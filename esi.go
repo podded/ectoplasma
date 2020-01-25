@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/gobuffalo/nulls"
 	"github.com/pkg/errors"
-	"github.com/podded/ectoplasma/models"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -160,7 +159,7 @@ func (c *ESIClient) MakeESIGet(url string) (body []byte, status int, etag string
 	return nil, status, etag, fmt.Errorf("Max retries exceeded for url: ; err: %v", url, err)
 }
 
-func (client *ESIClient) RequestKillmailFromESI(hp models.Hashpair) (km ESIKillmail, status int, etag string, err error) {
+func (client *ESIClient) RequestKillmailFromESI(hp IDHashPair) (km ESIKillmail, status int, etag string, err error) {
 
 	url := fmt.Sprintf(ESI_KILLMAIL_URL_FMT, hp.ID, hp.Hash)
 	body, status, etag, err := client.MakeESIGet(url)
