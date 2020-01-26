@@ -35,14 +35,14 @@ type (
 	}
 )
 
-func (goop *PodGoo) ListenAndServe() {
 
+func (goop *PodGoo) setupDBConnections() (err error) {
 	esiclient := NewESIClient()
 
 	goop.client = esiclient
 
 	// TODO Make the db connection configurable
-	clientOptions := options.Client().ApplyURI("mongodb://" + "localhost" + ":" + "27017")
+	clientOptions := options.Client().ApplyURI("mongodb://" + "podded-dev" + ":" + "27017")
 	client, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
 		return
@@ -51,7 +51,7 @@ func (goop *PodGoo) ListenAndServe() {
 	// Check the connection
 	err = client.Ping(context.TODO(), nil)
 	if err != nil {
-		return
+		return err
 	}
 
 	goop.dbClient = client
@@ -68,21 +68,33 @@ func (goop *PodGoo) ListenAndServe() {
 	}
 	goop.redis = rclient
 
+	return nil
+}
+
+func (goop *PodGoo) ListenAndServe() (err error){
+
+	err = goop.setupDBConnections()
+	if err != nil {
+		return err
+	}
+
 	r := mux.NewRouter()
 
 	r.HandleFunc("/submit", goop.HandleInsertRequest).Methods("POST")
 
 	srv := http.Server{
 		Addr:         goop.BoundHost + ":" + strconv.Itoa(goop.BoundPort),
-		ReadTimeout:  time.Second * 15,
-		WriteTimeout: time.Second * 15,
-		IdleTimeout:  time.Second * 60,
+		ReadTimeout:  time.Second * 30,
+		WriteTimeout: time.Second * 30,
+		IdleTimeout:  time.Second * 90,
 		Handler:      r,
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalln(err)
 	}
+
+	return nil
 
 }
 
@@ -213,6 +225,8 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 	if !found {
 		// We do not have this hash pair yet, awesome. I love new data
 
+		// TODO check and make sure that the hash is actually valid before inserting it
+
 		_, err := kmdb.InsertOne(ctx, idhp)
 		if err != nil {
 			// There was a problem saving
@@ -236,7 +250,8 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 				w.WriteHeader(http.StatusAccepted)
 				return
 			} else {
-				w.WriteHeader(http.StatusOK)
+				w.WriteHeader(http.StatusPaymentRequired)
+				return
 			}
 		} else {
 			// Need to check if what we have been given is valid.
@@ -248,12 +263,14 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			if err != nil {
 				log.Printf("ERROR: %s", err)
 				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
 
 			// 422
 			if status == http.StatusUnprocessableEntity {
 				msg := "Invalid killmail_id and/or killmail_hash"
 				http.Error(w, msg, http.StatusBadRequest)
+				return
 			}
 
 			//200
@@ -261,12 +278,13 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 				// This new ID Hash pair is valid... Update it and remark it for ingest
 				filter := bson.M{"_id": idhp.ID}
 				update := bson.M{"$set": bson.M{"hash": idhp.Hash}}
-				_, _ = kmdb.UpdateOne(ctx, filter, update) // Not fussed about the error here // TODO Check the error
+				_, err = kmdb.UpdateOne(ctx, filter, update) // TODO Check the error handling
 				if err != nil {
 					// There was a problem saving
 					log.Printf("ERROR: %s\n", err)
 					msg := "Failed to create record in db, not your fault though"
 					http.Error(w, msg, http.StatusInternalServerError)
+					return
 				}
 
 				goop.redis.RPush(REDIS_INGEST_QUEUE, idhp.ID)
@@ -282,4 +300,19 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+}
+
+func (goop *PodGoo) ScraperWorker() (err error) {
+
+	// Process for scraper is as follows:
+	// 1. Grab an id off of the ingest queue
+	// 2. Make request to ESI for the killmail
+	// 3. Insert killmail into the db under the `esi` field
+	// 4. Go to 1
+
+	for {
+		continue
+	}
+
+	return nil
 }
