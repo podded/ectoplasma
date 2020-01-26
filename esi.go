@@ -3,7 +3,6 @@ package ectoplasma
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/gobuffalo/nulls"
 	"github.com/pkg/errors"
 	"io/ioutil"
 	"net/http"
@@ -25,53 +24,50 @@ type (
 	}
 
 	ESIKillmail struct {
-		Attackers     []ESIAttacker `json:"attackers"`
-		KillmailID    int32         `json:"killmail_id"`
-		KillmailTime  time.Time     `json:"killmail_time"`
-		MoonID        nulls.Int32   `json:"moon_id"`
-		SolarSystemID int32         `json:"solar_system_id"`
-		Victim        ESIVictim     `json:"victim"`
-		WarID         nulls.Int32   `json:"war_id"`
+		Attackers     []ESIAttacker `json:"attackers" bson:"attackers"`
+		KillmailID    int           `json:"killmail_id" bson:"killmail_id"`
+		KillmailTime  time.Time     `json:"killmail_time" bson:"killmail_time"`
+		SolarSystemID int           `json:"solar_system_id" bson:"solar_system_id"`
+		Victim        ESIVictim     `json:"victim" bson:"victim"`
 	}
 
 	ESIAttacker struct {
-		AllianceID     nulls.Int32 `json:"alliance_id,omitempty"`
-		CorporationID  nulls.Int32 `json:"corporation_id"`
-		CharacterID    nulls.Int32 `json:"character_id"`
-		DamageDone     int32       `json:"damage_done"`
-		FinalBlow      bool        `json:"final_blow"`
-		SecurityStatus float64     `json:"security_status"`
-		ShipTypeID     nulls.Int32 `json:"ship_type_id"`
-		WeaponTypeID   nulls.Int32 `json:"weapon_type_id"`
+		AllianceID     int     `json:"alliance_id,omitempty" bson:"alliance_id,omitempty"`
+		CorporationID  int     `json:"corporation_id" bson:"corporation_id"`
+		CharacterID    int     `json:"character_id" bson:"character_id"`
+		DamageDone     int     `json:"damage_done" bson:"damage_done"`
+		FinalBlow      bool    `json:"final_blow" bson:"final_blow"`
+		SecurityStatus float32 `json:"security_status" bson:"security_status"`
+		ShipTypeID     int     `json:"ship_type_id" bson:"ship_type_id"`
+		WeaponTypeID   int     `json:"weapon_type_id" bson:"weapon_type_id"`
 	}
 
 	ESIVictim struct {
-		AllianceID    nulls.Int32 `json:"alliance_id,omitempty"`
-		CorporationID nulls.Int32 `json:"corporation_id"`
-		CharacterID   nulls.Int32 `json:"character_id"`
-		FactionID     nulls.Int32 `json:"faction_id,omitempty"`
-		DamageTaken   int32       `json:"damage_taken"`
-		Items         []ESIItem   `json:"items"`
-		Position      ESIPosition `json:"position"`
-		ShipTypeID    int32       `json:"ship_type_id"`
+		AllianceID    int         `json:"alliance_id,omitempty" bson:"alliance_id,omitempty"`
+		CorporationID int         `json:"corporation_id" bson:"corporation_id"`
+		CharacterID   int         `json:"character_id" bson:"character_id"`
+		DamageTaken   int         `json:"damage_taken" bson:"damage_taken"`
+		Items         []ESIItem   `json:"items" bson:"items"`
+		Position      ESIPosition `json:"position" bson:"position"`
+		ShipTypeID    int         `json:"ship_type_id" bson:"ship_type_id"`
 	}
 
 	ESIItem struct {
-		Flag              int32       `json:"flag"`
-		ItemTypeID        int32       `json:"item_type_id"`
-		QuantityDropped   nulls.Int64 `json:"quantity_dropped,omitempty"`
-		QuantityDestroyed nulls.Int64 `json:"quantity_destroyed,omitempty"`
-		Singleton         int32       `json:"singleton"`
+		Flag              int `json:"flag" bson:"flag"`
+		ItemTypeID        int `json:"item_type_id" bson:"item_type_id"`
+		QuantityDropped   int `json:"quantity_dropped,omitempty" bson:"quantity_dropped,omitempty"`
+		QuantityDestroyed int `json:"quantity_destroyed,omitempty" bson:"quantity_destroyed,omitempty"`
+		Singleton         int `json:"singleton" bson:"singleton"`
 	}
 
 	ESIPosition struct {
-		X float64 `json:"x"`
-		Y float64 `json:"y"`
-		Z float64 `json:"z"`
+		X float64 `json:"x" bson:"x"`
+		Y float64 `json:"y" bson:"y"`
+		Z float64 `json:"z" bson:"z"`
 	}
 )
 
-func NewESIClient() (*ESIClient) {
+func NewESIClient() *ESIClient {
 	rateLimESI := &safeCounter{}
 
 	go func() {
@@ -156,20 +152,19 @@ func (c *ESIClient) MakeESIGet(url string) (body []byte, status int, etag string
 		return body, status, etag, err
 	}
 
-	return nil, status, etag, fmt.Errorf("Max retries exceeded for url: ; err: %v", url, err)
+	return nil, status, etag, fmt.Errorf("Max retries exceeded for url: %s; err: %v", url, err)
 }
 
 func (client *ESIClient) RequestKillmailFromESI(hp IDHashPair) (km ESIKillmail, status int, etag string, err error) {
 
 	url := fmt.Sprintf(ESI_KILLMAIL_URL_FMT, hp.ID, hp.Hash)
 	body, status, etag, err := client.MakeESIGet(url)
-	if err != nil || status != http.StatusOK{
+	if err != nil || status != http.StatusOK {
 		return
 	}
 
 	err = json.Unmarshal(body, &km)
 	return
-
 
 }
 
