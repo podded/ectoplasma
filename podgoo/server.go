@@ -1,16 +1,17 @@
-package ectoplasma
+package podgoo
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/go-redis/redis"
 	"github.com/golang/gddo/httputil/header"
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
+	"github.com/podded/bouncer"
+	"github.com/podded/ectoplasma"
+	"github.com/podded/ectoplasma/killmail"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"io"
 	"log"
 	"net/http"
@@ -19,58 +20,11 @@ import (
 	"time"
 )
 
-type (
-	PodGoo struct {
-		BoundHost string
-		BoundPort int
-
-		dbClient *mongo.Client
-		redis    *redis.Client
-		client   *ESIClient
-	}
-
-	IDHashPair struct {
-		ID   int32  `json:"id" bson:"_id"`
-		Hash string `json:"hash" json:"hash"`
-	}
-)
-
 func (goop *PodGoo) ListenAndServe() {
-
-	esiclient := NewESIClient()
-
-	goop.client = esiclient
-
-	// TODO Make the db connection configurable
-	clientOptions := options.Client().ApplyURI("mongodb://" + "localhost" + ":" + "27017")
-	client, err := mongo.Connect(context.TODO(), clientOptions)
-	if err != nil {
-		return
-	}
-
-	// Check the connection
-	err = client.Ping(context.TODO(), nil)
-	if err != nil {
-		return
-	}
-
-	goop.dbClient = client
-
-	rclient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
-
-	pong, err := rclient.Ping().Result()
-	if err != nil || pong != "PONG" {
-		log.Fatalf("Failed to connect to redis: %s - %s\n", pong, err)
-	}
-	goop.redis = rclient
 
 	r := mux.NewRouter()
 
-	r.HandleFunc("/submit", goop.HandleInsertRequest).Methods("POST")
+	r.HandleFunc("/submit", goop.handleInsertRequest).Methods("POST")
 
 	srv := http.Server{
 		Addr:         goop.BoundHost + ":" + strconv.Itoa(goop.BoundPort),
@@ -86,7 +40,7 @@ func (goop *PodGoo) ListenAndServe() {
 
 }
 
-func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) {
+func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) {
 	// The initial part of this code is sourced from here:
 	//https://www.alexedwards.net/blog/how-to-properly-parse-a-json-request-body
 	// It was released under the MIT License found here: https://opensource.org/licenses/MIT
@@ -118,7 +72,7 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 
-	var idhp IDHashPair
+	var idhp killmail.IDHashPair
 	err := dec.Decode(&idhp)
 
 	if err != nil {
@@ -198,7 +152,7 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 
 	kmdb := goop.dbClient.Database("podded").Collection("killmails")
 
-	stored := IDHashPair{}
+	stored := killmail.IDHashPair{}
 	var found bool = true
 
 	err = kmdb.FindOne(ctx, bson.M{"_id": idhp.ID}).Decode(&stored)
@@ -206,6 +160,7 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 		if err == mongo.ErrNoDocuments {
 			found = false
 		} else {
+			// TODO return a nice error to the user
 			log.Fatal(err)
 		}
 	}
@@ -222,7 +177,7 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		goop.redis.RPush(REDIS_INGEST_QUEUE, idhp.ID)
+		goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
 		w.WriteHeader(http.StatusCreated)
 		return
 	} else {
@@ -230,9 +185,9 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 		// This ID already exists.... Check to see if the hashes the same
 		if stored.Hash == idhp.Hash {
 			// Sweet, we already have it but lets check for the magic update header presence
-			if r.Header.Get(MAGIC_HEADER) != "" {
+			if r.Header.Get(ectoplasma.MAGIC_HEADER) != "" {
 				// We want to update this entry so queue it to be updated
-				goop.redis.RPush(REDIS_INGEST_QUEUE, idhp.ID)
+				goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
 				w.WriteHeader(http.StatusAccepted)
 				return
 			} else {
@@ -244,16 +199,23 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			// 200 - Valid killmail with the data for said kill
 			// 422 - Invalid killmail_id and/or killmail_hash
 
-			_, status, _, err := goop.client.RequestKillmailFromESI(idhp)
+			r := bouncer.Request{
+				URL:    fmt.Sprintf("https://esi.evetech.net/v1/killmails/%s/%s/", idhp.ID, idhp.Hash),
+				Method: "GET",
+			}
+
+			res, status, err := goop.client.MakeRequest(r)
 			if err != nil {
 				log.Printf("ERROR: %s", err)
 				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
 
 			// 422
 			if status == http.StatusUnprocessableEntity {
 				msg := "Invalid killmail_id and/or killmail_hash"
 				http.Error(w, msg, http.StatusBadRequest)
+				return
 			}
 
 			//200
@@ -261,7 +223,7 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 				// This new ID Hash pair is valid... Update it and remark it for ingest
 				filter := bson.M{"_id": idhp.ID}
 				update := bson.M{"$set": bson.M{"hash": idhp.Hash}}
-				_, _ = kmdb.UpdateOne(ctx, filter, update) // Not fussed about the error here // TODO Check the error
+				_, err = kmdb.UpdateOne(ctx, filter, update)
 				if err != nil {
 					// There was a problem saving
 					log.Printf("ERROR: %s\n", err)
@@ -269,15 +231,23 @@ func (goop *PodGoo) HandleInsertRequest(w http.ResponseWriter, r *http.Request) 
 					http.Error(w, msg, http.StatusInternalServerError)
 				}
 
-				goop.redis.RPush(REDIS_INGEST_QUEUE, idhp.ID)
-				w.WriteHeader(http.StatusCreated)
+				var mail killmail.Killmail
+				err := json.Unmarshal(res.Body, &mail)
+				if err != nil {
+					// Put this back on the queue for ingest but dont process here.. Though this shouldn happen...
+					goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
+					w.WriteHeader(http.StatusCreated)
+					return
+				}
 
-				// TODO Use the killmail data we got to save a request and place this on the processing queue not ingest
+				f := bson.M{"_id": mail.KillmailId}
+				u := bson.M{"$set": bson.M{"esi_v1": mail}}
+				_, _ = kmdb.UpdateOne(ctx, f, u) // Not fussed about the error here // TODO Check the error
 				return
 			}
 
 			// Weird response from ESI, pass it through
-			msg := fmt.Sprintf("We have a weird response from esi. Status Code: %d", status + 1000)
+			msg := fmt.Sprintf("We have a weird response from esi. Status Code: %d", status+1000)
 			http.Error(w, msg, http.StatusInternalServerError)
 			return
 		}
