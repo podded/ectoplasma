@@ -4,23 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+
 	"github.com/podded/bouncer"
 	"github.com/podded/ectoplasma"
 	"github.com/podded/ectoplasma/killmail"
 	"go.mongodb.org/mongo-driver/bson"
-	"log"
-	"net/http"
-	"strconv"
 )
 
 func (goop *PodGoo) StartScraper() {
-
 	kmdb := goop.dbClient.Database("podded").Collection("killmails")
 
 	for {
 		ctx := context.TODO()
 		// Check if any available IDS in the ingest queue
-		res, err := goop.redis.BLPop(0, ectoplasma.REDIS_INGEST_QUEUE).Result()
+		res, err := goop.redis.BLPop(0, ectoplasma.RedisIngestQueue).Result()
 		if err != nil {
 			log.Println(err)
 			continue
@@ -30,6 +30,7 @@ func (goop *PodGoo) StartScraper() {
 		killid, err := strconv.Atoi(res[1])
 		if err != nil {
 			// TODO Load this onto the error queue to be looked at later
+			log.Printf("Invalid kill if popped from queue %s", res[1])
 		}
 
 		// First get the hash we have stored for this id.
@@ -66,19 +67,19 @@ func (goop *PodGoo) StartScraper() {
 			continue
 		}
 
-		//200
+		// 200
 		if status == http.StatusOK {
 			// This new ID Hash pair is valid... INSERT ALL THE THINGS!
-			var mail killmail.Killmail
-			err := json.Unmarshal(resp.Body, &mail)
+			var mail killmail.Mail
+			err = json.Unmarshal(resp.Body, &mail)
 			if err != nil {
 				// Put this on the error queue as something is up
 				// TODO Implement the Error Queue
-				//goop.redis.RPush(ectoplasma.REDIS_ERROR_QUEUE, idhp.ID)
+				// goop.redis.RPush(ectoplasma.RedisErrorQueue, idhp.ID)
 				log.Printf("ERROR: Failed to decode esi response for %d, err: %s", killid, err)
 			}
 
-			f := bson.M{"_id": mail.KillmailId}
+			f := bson.M{"_id": mail.KillmailID}
 			u := bson.M{"$set": bson.M{"esi_v1": mail}}
 			_, _ = kmdb.UpdateOne(ctx, f, u) // Not fussed about the error here // TODO Check the error
 			continue
@@ -87,8 +88,7 @@ func (goop *PodGoo) StartScraper() {
 		// We got some other response code...
 		// Put this on the error queue as something is up
 		// TODO Implement the Error Queue
-		//goop.redis.RPush(ectoplasma.REDIS_ERROR_QUEUE, idhp.ID)
+		// goop.redis.RPush(ectoplasma.RedisErrorQueue, idhp.ID)
 		log.Printf("ERROR: Failed to decode esi response for %d, err: %s", killid, err)
-
 	}
 }

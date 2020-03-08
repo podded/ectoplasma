@@ -4,6 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/golang/gddo/httputil/header"
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
@@ -12,16 +19,9 @@ import (
 	"github.com/podded/ectoplasma/killmail"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"io"
-	"log"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func (goop *PodGoo) ListenAndServe() {
-
 	r := mux.NewRouter()
 
 	r.HandleFunc("/submit", goop.handleInsertRequest).Methods("POST")
@@ -37,8 +37,6 @@ func (goop *PodGoo) ListenAndServe() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalln(err)
 	}
-
-
 }
 
 func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +99,8 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 		// interpolate the relevant field name and position into the error
 		// message to make it easier for the client to fix.
 		case errors.As(err, &unmarshalTypeError):
-			msg := fmt.Sprintf("Request body contains an invalid value for the %q field (at position %d)", unmarshalTypeError.Field, unmarshalTypeError.Offset)
+			msg := fmt.Sprintf("Request body contains an invalid value for the %q field (at position %d)",
+				unmarshalTypeError.Field, unmarshalTypeError.Offset)
 			http.Error(w, msg, http.StatusBadRequest)
 
 		// Catch the error caused by extra unexpected fields in the request
@@ -171,7 +170,7 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 
 		// TODO check and make sure that the hash is actually valid before inserting it
 
-		_, err := kmdb.InsertOne(ctx, idhp)
+		_, err = kmdb.InsertOne(ctx, idhp)
 		if err != nil {
 			// There was a problem saving
 			log.Printf("ERROR: %s\n", err)
@@ -180,81 +179,77 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
+		goop.redis.RPush(ectoplasma.RedisIngestQueue, idhp.ID)
 		w.WriteHeader(http.StatusCreated)
 		return
-	} else {
+	}
 
-		// This ID already exists.... Check to see if the hashes the same
-		if stored.Hash == idhp.Hash {
-			// Sweet, we already have it but lets check for the magic update header presence
-			if r.Header.Get(ectoplasma.MAGIC_HEADER) != "" {
-				// We want to update this entry so queue it to be updated
-				goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
-				w.WriteHeader(http.StatusAccepted)
-				return
-			} else {
-				w.WriteHeader(http.StatusPaymentRequired)
-				return
-			}
-		} else {
-			// Need to check if what we have been given is valid.
-			// There are a couple of status codes we could get back from esi that we should handle specifically
-			// 200 - Valid killmail with the data for said kill
-			// 422 - Invalid killmail_id and/or killmail_hash
+	// This ID already exists.... Check to see if the hashes the same
+	if stored.Hash == idhp.Hash {
+		// Sweet, we already have it but lets check for the magic update header presence
+		if r.Header.Get(ectoplasma.MagicHeader) != "" {
+			// We want to update this entry so queue it to be updated
+			goop.redis.RPush(ectoplasma.RedisIngestQueue, idhp.ID)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		return
+	}
+	// Need to check if what we have been given is valid.
+	// There are a couple of status codes we could get back from esi that we should handle specifically
+	// 200 - Valid killmail with the data for said kill
+	// 422 - Invalid killmail_id and/or killmail_hash
 
-			r := bouncer.Request{
-				URL:    fmt.Sprintf("https://esi.evetech.net/v1/killmails/%d/%s/", idhp.ID, idhp.Hash),
-				Method: "GET",
-			}
+	req := bouncer.Request{
+		URL:    fmt.Sprintf("https://esi.evetech.net/v1/killmails/%d/%s/", idhp.ID, idhp.Hash),
+		Method: "GET",
+	}
 
-			res, status, err := goop.client.MakeRequest(r)
-			if err != nil {
-				log.Printf("ERROR: %s", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
+	res, status, err := goop.client.MakeRequest(req)
+	if err != nil {
+		log.Printf("ERROR: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-			// 422
-			if status == http.StatusUnprocessableEntity {
-				msg := "Invalid killmail_id and/or killmail_hash"
-				http.Error(w, msg, http.StatusBadRequest)
-				return
-			}
+	// 422
+	if status == http.StatusUnprocessableEntity {
+		msg := "Invalid killmail_id and/or killmail_hash"
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 
-			//200
-			if status == http.StatusOK {
-				// This new ID Hash pair is valid... Update it and remark it for ingest
-				filter := bson.M{"_id": idhp.ID}
-				update := bson.M{"$set": bson.M{"hash": idhp.Hash}}
-				_, err = kmdb.UpdateOne(ctx, filter, update) // TODO Check the error handling
-				if err != nil {
-					// There was a problem saving
-					log.Printf("ERROR: %s\n", err)
-					msg := "Failed to create record in db, not your fault though"
-					http.Error(w, msg, http.StatusInternalServerError)
-					return
-				}
-
-				var mail killmail.Killmail
-				err := json.Unmarshal(res.Body, &mail)
-				if err != nil {
-					// Put this back on the queue for ingest but dont process here.. Though this shouldn happen...
-					goop.redis.RPush(ectoplasma.REDIS_INGEST_QUEUE, idhp.ID)
-					w.WriteHeader(http.StatusCreated)
-					return
-				}
-
-				f := bson.M{"_id": mail.KillmailId}
-				u := bson.M{"$set": bson.M{"esi_v1": mail}}
-				_, _ = kmdb.UpdateOne(ctx, f, u) // Not fussed about the error here // TODO Check the error
-				return
-			}
-
-			// Weird response from ESI, pass it through
-			msg := fmt.Sprintf("We have a weird response from esi. Status Code: %d", status+1000)
+	// 200
+	if status == http.StatusOK {
+		// This new ID Hash pair is valid... Update it and remark it for ingest
+		filter := bson.M{"_id": idhp.ID}
+		update := bson.M{"$set": bson.M{"hash": idhp.Hash}}
+		_, err = kmdb.UpdateOne(ctx, filter, update) // TODO Check the error handling
+		if err != nil {
+			// There was a problem saving
+			log.Printf("ERROR: %s\n", err)
+			msg := "Failed to create record in db, not your fault though"
 			http.Error(w, msg, http.StatusInternalServerError)
 			return
 		}
+
+		var mail killmail.Mail
+		err := json.Unmarshal(res.Body, &mail)
+		if err != nil {
+			// Put this back on the queue for ingest but dont process here.. Though this shouldn happen...
+			goop.redis.RPush(ectoplasma.RedisIngestQueue, idhp.ID)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+
+		f := bson.M{"_id": mail.KillmailID}
+		u := bson.M{"$set": bson.M{"esi_v1": mail}}
+		_, _ = kmdb.UpdateOne(ctx, f, u) // Not fussed about the error here // TODO Check the error
+		return
 	}
+
+	// Weird response from ESI, pass it through
+	msg := fmt.Sprintf("We have a weird response from esi. Status Code: %d", status)
+	http.Error(w, msg, http.StatusInternalServerError)
 }

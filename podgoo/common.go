@@ -22,12 +22,10 @@ type (
 	}
 )
 
-func NewPodGoo(BouncerAddress string, MaxTimeout time.Duration, Descriptor string) (goop *PodGoo) {
-
+func NewPodGoo(bouncerAddress string, maxTimeout time.Duration, descriptor string) (goop *PodGoo) {
 	sludge := &PodGoo{}
 
-	// NewBoucher(ServerAddress string, MaxTimeout time.Duration, Descriptor string) (bouncerClient *BouncerClient, version string, err error) {)
-	bc, version, err := client.NewBouncer(BouncerAddress, MaxTimeout, Descriptor)
+	bc, version, err := client.NewBouncer(bouncerAddress, maxTimeout, descriptor)
 	if err != nil {
 		log.Fatalf("Failed to connect to bouncer....: %s\n", err)
 	}
