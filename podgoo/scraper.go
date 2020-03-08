@@ -51,10 +51,13 @@ func (goop *PodGoo) StartScraper() {
 			Method: "GET",
 		}
 
-		resp, status, err := goop.client.MakeRequest(r)
+		resp, _, err := goop.client.MakeRequest(r)
 		if err != nil {
 			log.Printf("ERROR making esi request for id %d: %s", killid, err)
+			continue
 		}
+
+		status := resp.StatusCode
 
 		// 422
 		if status == http.StatusUnprocessableEntity {
@@ -77,6 +80,7 @@ func (goop *PodGoo) StartScraper() {
 				// TODO Implement the Error Queue
 				// goop.redis.RPush(ectoplasma.RedisErrorQueue, idhp.ID)
 				log.Printf("ERROR: Failed to decode esi response for %d, err: %s", killid, err)
+				continue
 			}
 
 			f := bson.M{"_id": mail.KillmailID}
@@ -89,6 +93,6 @@ func (goop *PodGoo) StartScraper() {
 		// Put this on the error queue as something is up
 		// TODO Implement the Error Queue
 		// goop.redis.RPush(ectoplasma.RedisErrorQueue, idhp.ID)
-		log.Printf("ERROR: Failed to decode esi response for %d, code: %d, body: %s", killid, status, string(resp.Body))
+		log.Printf("ERROR: Bad esi response for %d, code: %d, body: %s", killid, status, string(resp.Body))
 	}
 }
