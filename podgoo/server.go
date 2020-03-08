@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+<<<<<<< HEAD:podgoo/server.go
+=======
+	"github.com/go-redis/redis/v7"
+>>>>>>> 9380b0ff3060b97a19d7215ab6e1220c4ec86acb:podgoo.go
 	"github.com/golang/gddo/httputil/header"
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
@@ -20,23 +24,104 @@ import (
 	"time"
 )
 
+<<<<<<< HEAD:podgoo/server.go
 func (goop *PodGoo) ListenAndServe() {
 
+=======
+type (
+	PodGoo struct {
+		BoundHost string
+		BoundPort int
+
+		dbClient *mongo.Client
+		redis    *redis.Client
+		client   *ESIClient
+	}
+
+	IDHashPair struct {
+		ID   int32  `json:"id" bson:"_id"`
+		Hash string `json:"hash" json:"hash"`
+	}
+
+	PoddedKillmail struct {
+		ID int32 `json:"id" bson:"_id"`
+		Hash string `json:"hash" bson:"hash"`
+		Killmail ESIKillmail `json:"esi" bson:"esi"`
+		Published bool `json:"published" bson:"published"` // TODO Implement the published marker
+	}
+)
+
+func (goop *PodGoo) setupDBConnections() (err error) {
+	esiclient := NewESIClient()
+
+	goop.client = esiclient
+
+	// TODO Make the db connection configurable
+	clientOptions := options.Client().ApplyURI("mongodb://" + "podded-dev" + ":" + "27017")
+	client, err := mongo.Connect(context.TODO(), clientOptions)
+	if err != nil {
+		return
+	}
+
+	// Check the connection
+	err = client.Ping(context.TODO(), nil)
+	if err != nil {
+		return err
+	}
+
+	goop.dbClient = client
+
+	rclient := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+
+	pong, err := rclient.Ping().Result()
+	if err != nil || pong != "PONG" {
+		log.Fatalf("Failed to connect to redis: %s - %s\n", pong, err)
+	}
+	goop.redis = rclient
+
+	return nil
+}
+
+func (goop *PodGoo) closeDBConnections() () {
+
+	ctx := context.Background()
+
+	goop.client.HTTP.CloseIdleConnections()
+	goop.dbClient.Disconnect(ctx)
+	goop.redis.Close()
+
+}
+
+func (goop *PodGoo) ListenAndServe() (err error) {
+
+	err = goop.setupDBConnections()
+	if err != nil {
+		return err
+	}
+	defer goop.closeDBConnections()
+
+>>>>>>> 9380b0ff3060b97a19d7215ab6e1220c4ec86acb:podgoo.go
 	r := mux.NewRouter()
 
 	r.HandleFunc("/submit", goop.handleInsertRequest).Methods("POST")
 
 	srv := http.Server{
 		Addr:         goop.BoundHost + ":" + strconv.Itoa(goop.BoundPort),
-		ReadTimeout:  time.Second * 15,
-		WriteTimeout: time.Second * 15,
-		IdleTimeout:  time.Second * 60,
+		ReadTimeout:  time.Second * 30,
+		WriteTimeout: time.Second * 30,
+		IdleTimeout:  time.Second * 90,
 		Handler:      r,
 	}
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalln(err)
 	}
+
+	return nil
 
 }
 
@@ -168,6 +253,8 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 	if !found {
 		// We do not have this hash pair yet, awesome. I love new data
 
+		// TODO check and make sure that the hash is actually valid before inserting it
+
 		_, err := kmdb.InsertOne(ctx, idhp)
 		if err != nil {
 			// There was a problem saving
@@ -191,7 +278,8 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 				w.WriteHeader(http.StatusAccepted)
 				return
 			} else {
-				w.WriteHeader(http.StatusOK)
+				w.WriteHeader(http.StatusPaymentRequired)
+				return
 			}
 		} else {
 			// Need to check if what we have been given is valid.
@@ -223,12 +311,17 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 				// This new ID Hash pair is valid... Update it and remark it for ingest
 				filter := bson.M{"_id": idhp.ID}
 				update := bson.M{"$set": bson.M{"hash": idhp.Hash}}
+<<<<<<< HEAD:podgoo/server.go
 				_, err = kmdb.UpdateOne(ctx, filter, update)
+=======
+				_, err = kmdb.UpdateOne(ctx, filter, update) // TODO Check the error handling
+>>>>>>> 9380b0ff3060b97a19d7215ab6e1220c4ec86acb:podgoo.go
 				if err != nil {
 					// There was a problem saving
 					log.Printf("ERROR: %s\n", err)
 					msg := "Failed to create record in db, not your fault though"
 					http.Error(w, msg, http.StatusInternalServerError)
+					return
 				}
 
 				var mail killmail.Killmail
@@ -251,5 +344,82 @@ func (goop *PodGoo) handleInsertRequest(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, msg, http.StatusInternalServerError)
 			return
 		}
+	}
+}
+
+func (goop *PodGoo) ProcessIngestQueue() (err error) {
+
+	// Process for scraper is as follows:
+	// 1. Grab an id off of the ingest queue
+	// 2. Make request to ESI for the killmail
+	// 3. Insert killmail into the db under the `esi` field
+	// 4. Go to 1
+
+	err = goop.setupDBConnections()
+	if err != nil {
+		return err
+	}
+	defer goop.closeDBConnections()
+
+	kmdb := goop.dbClient.Database("podded").Collection("killmails")
+
+	for {
+
+		res, err := goop.redis.BLPop(0, REDIS_INGEST_QUEUE).Result()
+		if err != nil {
+			log.Fatalf("Redis BLPOP error: err -> %v", err)
+		}
+
+		// We now have an id to work on, grab the ID Hash pair from the DB
+
+		ctx := context.Background()
+
+		id, err :=  strconv.Atoi(res[1]) // TODO find out a better method instead of res[1] (learn redis package)
+		if err != nil {
+			log.Fatalf("Error converting %s to integer: %v", res[1], err)
+		}
+
+		idhp := IDHashPair{}
+		err = kmdb.FindOne(ctx, bson.M{"_id":id}).Decode(&idhp)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				log.Printf("ERROR: Missing id hash pair in the database... This shouldnt happen... ID: %v\n", id)
+			} else {
+				log.Printf("Error retrieveing idhp from mongo. err: %v\n", err)
+				return err
+			}
+		}
+
+		km, status, _, err := goop.client.RequestKillmailFromESI(idhp)
+		if err != nil {
+			log.Printf("ERROR: %s\n", err)
+			return err
+		}
+
+		// 422
+		if status == http.StatusUnprocessableEntity {
+			// The killmail hash pair is bad. No ingest to occur. Remove it from the DB. This is not fatal so continue
+			_, _ = kmdb.DeleteOne(ctx, bson.M{"_id": id}) // Really dont care what goes on here.. TODO Care about this
+			continue
+		}
+
+		//200
+		if status == http.StatusOK {
+			// This new ID Hash pair is valid... Update it and remark it for ingest
+			filter := bson.M{"_id": idhp.ID}
+			update := bson.M{"$set": bson.M{"esi": km}}
+			_, err = kmdb.UpdateOne(ctx, filter, update) // TODO Check the error handling
+			if err != nil {
+				// There was a problem saving
+				log.Fatalf("ERROR: %s\n", err)
+			}
+
+			goop.redis.RPush(REDIS_UPDATE_QUEUE, idhp.ID)
+
+			// TODO Use the killmail data we got to save a request and place this on the processing queue not ingest
+			continue
+		}
+
+
 	}
 }

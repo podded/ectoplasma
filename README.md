@@ -6,8 +6,8 @@ There is a single endpoint exposed, which is the `/submit` endpoint. This accept
 
 ```json
 {
-  "killmail_hash": "2103ec9811c2de80a2d4d53b2e9df2144b054627",
-  "killmail_id": 34257049
+  "hash": "2103ec9811c2de80a2d4d53b2e9df2144b054627",
+  "id": 34257049
 }
 ```
 
