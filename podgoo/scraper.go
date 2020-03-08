@@ -46,7 +46,7 @@ func (goop *PodGoo) StartScraper() {
 		}
 
 		r := bouncer.Request{
-			URL:    fmt.Sprintf("https://esi.evetech.net/v1/killmails/%s/%s/", idhp.ID, idhp.Hash),
+			URL:    fmt.Sprintf("https://esi.evetech.net/v1/killmails/%d/%s/", idhp.ID, idhp.Hash),
 			Method: "GET",
 		}
 

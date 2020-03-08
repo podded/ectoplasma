@@ -8,6 +8,13 @@ type (
 		Hash string `json:"hash" bson:"hash"`
 	}
 
+	PoddedKillmail struct {
+		ID int32 `json:"id" bson:"_id"`
+		Hash string `json:"hash" bson:"hash"`
+		Killmail Killmail `json:"esi_v1" bson:"esi_v1"`
+		Published bool `json:"published" bson:"published"` // TODO Implement the published marker
+	}
+
 	Killmail struct {
 		Attackers     []KillmailAttacker `json:"attackers,omitempty"`       /* attackers array */
 		KillmailId    int32              `json:"killmail_id,omitempty"`     /* ID of the killmail */

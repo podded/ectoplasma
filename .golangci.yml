@@ -96,40 +96,14 @@ linters:
     - varcheck
     - whitespace
     - gochecknoglobals
-<<<<<<< HEAD
     - gocognit
     - godox
     - maligned
     - prealloc
 
-=======
-    - godox
-    - prealloc
-
-
-# don't enable:
-  # - gocognit
-  # - maligned
-
->>>>>>> 9380b0ff3060b97a19d7215ab6e1220c4ec86acb
 issues:
   # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
     - path: _test\.go
       linters:
         - gomnd
-
-<<<<<<< HEAD
-run:
-  skip-dirs:
-    - test/testdata_etc
-    - internal/cache
-    - internal/renameio
-    - internal/robustio
-
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
-service:
-  golangci-lint-version: 1.23.x # use the fixed version to not introduce new linters unexpectedly
-=======
->>>>>>> 9380b0ff3060b97a19d7215ab6e1220c4ec86acb
