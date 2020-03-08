@@ -11,7 +11,7 @@ func main() {
 	// TODO Make all of this configurable!
 	goop := podgoo.NewPodGoo("http://localhost:13271", 10*time.Second, "ecto_server")
 	goop.BoundHost = "0.0.0.0"
-	goop.BoundPort = 13271
+	goop.BoundPort = 13270
 
 	goop.ListenAndServe()
 }
