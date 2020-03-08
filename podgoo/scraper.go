@@ -16,9 +16,9 @@ import (
 
 func (goop *PodGoo) StartScraper() {
 	kmdb := goop.dbClient.Database("podded").Collection("killmails")
+	ctx := context.Background()
 
 	for {
-		ctx := context.TODO()
 		// Check if any available IDS in the ingest queue
 		res, err := goop.redis.BLPop(0, ectoplasma.RedisIngestQueue).Result()
 		if err != nil {
@@ -89,6 +89,6 @@ func (goop *PodGoo) StartScraper() {
 		// Put this on the error queue as something is up
 		// TODO Implement the Error Queue
 		// goop.redis.RPush(ectoplasma.RedisErrorQueue, idhp.ID)
-		log.Printf("ERROR: Failed to decode esi response for %d, err: %s", killid, err)
+		log.Printf("ERROR: Failed to decode esi response for %d, code: %d, body: %s", killid, status, string(resp.Body))
 	}
 }
