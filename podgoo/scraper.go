@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"strconv"
-	"time"
-
 	"github.com/podded/bouncer"
 	"github.com/podded/ectoplasma"
 	"github.com/podded/ectoplasma/killmail"
 	"go.mongodb.org/mongo-driver/bson"
+	"log"
+	"net/http"
+	"strconv"
 )
 
 func (goop *PodGoo) StartScraper() {
@@ -24,7 +22,7 @@ func (goop *PodGoo) StartScraper() {
 
 	for {
 		// Check if any available IDS in the ingest queue
-		res, err := goop.redis.BLPop(5*time.Second, ectoplasma.RedisIngestQueue).Result()
+		res, err := goop.redis.BLPop(0, ectoplasma.RedisIngestQueue).Result()
 		if err != nil {
 			log.Println(err)
 			continue
