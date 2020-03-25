@@ -13,7 +13,7 @@ require (
 	github.com/onsi/ginkgo v1.10.3 // indirect
 	github.com/onsi/gomega v1.7.1 // indirect
 	github.com/pkg/errors v0.9.1
-	github.com/podded/bouncer v0.0.0-20200306051122-0e8c1e64ff10
+	github.com/podded/bouncer v0.0.0-20200324203013-dfe2e4ff10ee
 	github.com/tidwall/pretty v1.0.0 // indirect
 	github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c // indirect
 	github.com/xdg/stringprep v1.0.0 // indirect

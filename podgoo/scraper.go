@@ -15,16 +15,14 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-func (goop *PodGoo) StartScraper(ctx context.Context) {
+func (goop *PodGoo) StartScraper() {
+
+	ctx := context.Background()
 
 	kmdb := goop.dbClient.Database("podded").Collection("killmails")
 
-	shouldStop := false
 
 	for {
-		if shouldStop {
-			return
-		}
 		// Check if any available IDS in the ingest queue
 		res, err := goop.redis.BLPop(5*time.Second, ectoplasma.RedisIngestQueue).Result()
 		if err != nil {
