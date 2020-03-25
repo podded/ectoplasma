@@ -1,12 +1,7 @@
 package main
 
 import (
-	"context"
-	"os"
-	"os/signal"
 	"strconv"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gobuffalo/envy"
