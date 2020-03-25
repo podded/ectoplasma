@@ -22,7 +22,7 @@ func main() {
 	timeoutEnv := envy.Get("ECTO_SCRAPER_TIMEOUT", "10")
 	descriptor := envy.Get("ECTO_SCRAPER_DESC", "ecto_ingest")
 
-	numWorkersEnv := envy.Get("ECTO_SCRAPER_WORKERS", "1")
+	//numWorkersEnv := envy.Get("ECTO_SCRAPER_WORKERS", "1")
 
 	timeout := 10
 	i ,err := strconv.Atoi(timeoutEnv)
@@ -31,10 +31,10 @@ func main() {
 	}
 
 	numWorkers := 1
-	i ,err = strconv.Atoi(numWorkersEnv)
-	if err != nil {
-		numWorkers = i
-	}
+	//i ,err = strconv.Atoi(numWorkersEnv)
+	//if err != nil {
+	//	numWorkers = i
+	//}
 
 	ctx := NewCtx()
 
